@@ -46,6 +46,14 @@ class ModelSelector(object):
                 print("failure on {} with {} states".format(self.this_word, num_states))
             return None
 
+    def p_val(self, n_components):
+        """
+        Calculate the number of free parameters based off discussion below
+        https://discussions.udacity.com/t/understanding-better-model-selection/232987/3
+        """
+        n, feature_length = self.X.shape
+        return n_components**2 - 2*n_components*feature_length - 1
+
 
 class SelectorConstant(ModelSelector):
     """ select the model with value self.n_constant
@@ -67,6 +75,9 @@ class SelectorBIC(ModelSelector):
     http://www2.imm.dtu.dk/courses/02433/doc/ch6_slides.pdf
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
+    def bic_score(self, n_components, logl):
+        n, feature_len = self.X.shape
+        return -2 * logl + self.p_val(n_components) * np.log(n)
 
     def select(self):
         """ select the best model for self.this_word based on
@@ -75,9 +86,19 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        try:
+            score_list = []
+            for n in range(self.min_n_components, self.max_n_components + 1):
+                trained_model = self.base_model(n)
+                if trained_model:
+                    log_l = trained_model.score(self.X, self.lengths)
+                    final_score = self.bic_score(n, log_l)
+                    score_list.append((trained_model, final_score))
+                if score_list:
+                    best_model, best_score = max(score_list, key=lambda x: x[1])
+                    return best_model
+        except Exception as e:
+            return None
 
 
 class SelectorDIC(ModelSelector):
@@ -103,6 +124,32 @@ class SelectorCV(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        # first train all hmmm based on fold
+        # then validate by scoring against test sample
+        # select the highest avg log likelyhood model
+        split_method = KFold()
+        model_list = []
+        for i in range(self.min_n_components, self.max_n_components + 1):
+            log_llist = []
+            trained_model = None
+            try:
+                if len(self.sequences) > 2:
+                    for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                        x_train, len_train = combine_sequences(cv_train_idx, self.sequences)
+                        self.X = x_train
+                        self.lengths = len_train
+                        x_test, len_test = combine_sequences(cv_test_idx, self.sequences)
+                        trained_model = self.base_model(i)
+                        log_l = trained_model.score(x_test, len_test)
+                        log_llist.append(log_l)
+                else:
+                    trained_model = self.base_model(i)
+                    log_l = trained_model.score(self.X, self.lengths)
+            except:
+                return None
+            avg = 0
+            if len(log_llist) > 0:
+                avg = sum(log_llist, 0) / len(log_llist)
+            model_list.append((trained_model, avg))
+            best_model = max(model_list, key=lambda x: x[1])
+            return best_model[0]
