@@ -110,11 +110,35 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    def compute_mean_logL_others(self, word, trained_model):
+        def calc_score(t_wd, model):
+            try:
+                log_l = model.score(self.hwords[t_wd])
+                return log_l
+            except:
+                return 0
+
+        other_words = [otr_wd for otr_wd in self.words if otr_wd != word]
+        score_otr_word = [calc_score(wd, trained_model) for wd in other_words]
+        return np.mean(score_otr_word, axis=None)
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        model_score = []
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            trained_model = self.base_model(n)
+            if trained_model:
+                try:
+                    log_l_of_x = trained_model.score(self.X, self.lengths)
+                    log_l_not_x = self.compute_mean_logL_others(self.this_word, trained_model)
+                    dic_score = log_l_of_x - log_l_not_x
+                    model_score.append((trained_model, dic_score))
+                except:
+                    model_score.append((None, 0))
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        best_model = max(model_score, key=lambda x: x[1])
+        return best_model[0]
+
 
 
 class SelectorCV(ModelSelector):
